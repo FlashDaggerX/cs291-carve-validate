@@ -8,4 +8,6 @@ edition = "2021"
 [dependencies]
 md5 = "0.7.0"
 getopts = "0.2.21"
+hex = "0.4.3"
+memmem = "0.1.1"
 
