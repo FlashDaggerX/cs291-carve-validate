@@ -10,7 +10,7 @@ use std::io::{Read, Seek, SeekFrom, Write};
 use std::thread;
 use std::vec::Vec;
 
-static THREADS: usize = 8;
+static THREADS: usize = 1;
 static EXPECTED_BYTES_MAX: usize = 200000;
 
 fn create_file(name: String, hashes: Vec<String>, ofs: u64) {
@@ -19,49 +19,34 @@ fn create_file(name: String, hashes: Vec<String>, ofs: u64) {
         .seek(SeekFrom::Start(ofs))
         .expect("Couldn't seek in file thread.");
 
-    let mut curofs = ofs;
     let mut bytes = 0;
+
     let mut contents = Vec::with_capacity(EXPECTED_BYTES_MAX);
+    Read::by_ref(&mut carvefile)
+        .take(EXPECTED_BYTES_MAX as u64)
+        .read_to_end(&mut contents)
+        .unwrap();
+
+    println!("Read {} bytes into contents, beginning check at offset {}", EXPECTED_BYTES_MAX, ofs);
 
     'build: while bytes <= EXPECTED_BYTES_MAX {
-        curofs += 1;
-        bytes = (curofs - ofs) as usize;
-
-        Read::by_ref(&mut carvefile)
-            .take(bytes as u64)
-            .read_to_end(&mut contents)
-            .unwrap();
-        carvefile
-            .seek(SeekFrom::Start(ofs))
-            .expect("Couldn't seek in file thread.");
+        bytes += 1;
 
         for hash in &hashes {
-            let chash = format!("{:x}", compute(&contents[..bytes-1]));
-            let chash = chash.trim();
-
-            if contents.len() <= 0 {
-                println!("Comparing byte size zero, could not find suitable hash. Exiting thread at offset {}", curofs);
-                break 'build;
-            }
-
-            if chash == hash.to_lowercase() {
+            if format!("{:x}", compute(&contents[..bytes])) == *hash {
                 println!(
                     "Successfully found file matching hash {}, with offsets {}-{} (size {})",
-                    hash, ofs, curofs, bytes
+                    hash, ofs, (ofs+bytes as u64), bytes
                 );
 
-                let mut newfile = File::create(format!("{}.carve", hash)).unwrap();
-                newfile.write_all(contents.as_slice()).unwrap();
-                newfile.flush().unwrap();
+                let mut newfile = File::create(format!("{}.carve", hash)).expect("Couldn't create file.");
+                newfile.write_all(&contents[0..bytes]).expect("Couldn't write data.");
+                newfile.flush().expect("Couldn't flush data to file.");
 
                 break 'build;
             }
         }
-
-        contents.clear();
     }
-
-    println!("Exiting from carving thread at offset {}", curofs);
 }
 
 fn main() -> Result<(), std::io::Error> {
@@ -87,7 +72,7 @@ fn main() -> Result<(), std::io::Error> {
         String::from_utf8(read(hashname).expect("Can't read from hash file."))
             .unwrap()
             .split("\n")
-            .map(|s| s.trim().to_string())
+            .map(|s| s.trim().to_string().to_lowercase())
             .filter(|s| s.len() > 0)
             .collect();
     // Temporary value stored in 'extensions' to allow borrow
@@ -99,7 +84,7 @@ fn main() -> Result<(), std::io::Error> {
         .collect();
 
     let mut carvefile = File::open(&carvename).unwrap();
-    let mut buffer: [u8; 24] = [0; 24];
+    let mut buffer: [u8; 32] = [0; 32];
 
     let mut threads: Vec<thread::JoinHandle<()>> = Vec::with_capacity(THREADS);
 
