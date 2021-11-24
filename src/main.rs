@@ -10,7 +10,7 @@ use std::io::{Read, Seek, SeekFrom, Write};
 use std::thread;
 use std::vec::Vec;
 
-static THREADS: usize = 1;
+static THREADS: usize = 8;
 static EXPECTED_BYTES_MAX: usize = 200000;
 
 fn create_file(name: String, hashes: Vec<String>, ofs: u64) {
@@ -19,7 +19,7 @@ fn create_file(name: String, hashes: Vec<String>, ofs: u64) {
         .seek(SeekFrom::Start(ofs))
         .expect("Couldn't seek in file thread.");
 
-    let mut bytes = 0;
+    let mut bytes = 24;
 
     let mut contents = Vec::with_capacity(EXPECTED_BYTES_MAX);
     Read::by_ref(&mut carvefile)
