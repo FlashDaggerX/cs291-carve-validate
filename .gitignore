@@ -1,1 +1,3 @@
 /target
+# Ignores the run script used inside the project directory.
+run.sh
