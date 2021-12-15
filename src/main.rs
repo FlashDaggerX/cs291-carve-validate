@@ -10,7 +10,6 @@ use std::io::{Read, Seek, SeekFrom, Write};
 use std::thread;
 use std::vec::Vec;
 
-static THREADS: usize = 8;
 static EXPECTED_BYTES_MAX: usize = 200000;
 
 fn create_file(name: String, hashes: Vec<String>, ofs: u64) {
@@ -19,7 +18,7 @@ fn create_file(name: String, hashes: Vec<String>, ofs: u64) {
         .seek(SeekFrom::Start(ofs))
         .expect("Couldn't seek in file thread.");
 
-    let mut bytes = 24;
+    let mut bytes = 0;
 
     let mut contents = Vec::with_capacity(EXPECTED_BYTES_MAX);
     Read::by_ref(&mut carvefile)
@@ -29,7 +28,7 @@ fn create_file(name: String, hashes: Vec<String>, ofs: u64) {
 
     println!("Read {} bytes into contents, beginning check at offset {}", EXPECTED_BYTES_MAX, ofs);
 
-    'build: while bytes <= EXPECTED_BYTES_MAX {
+    'build: while bytes < EXPECTED_BYTES_MAX {
         bytes += 1;
 
         for hash in &hashes {
@@ -54,8 +53,9 @@ fn main() -> Result<(), std::io::Error> {
 
     opts.reqopt("f", "", "The file to be carved", "FILE")
         .reqopt("h", "", "A line-delimited list of MD5 hashes", "FILE")
-        .reqopt("e", "", "A line-delimited list of magic numbers", "FILE");
-
+        .reqopt("e", "", "A line-delimited list of magic numbers", "FILE")
+        .optopt("j", "jobs", "The threads that can be spawned", "NUMBER")
+        .optopt("s", "seek", "The amount of bytes to seek at", "NUMBER");
     let sysargs: Vec<String> = args().collect();
     let matches = opts.parse(&sysargs[1..]);
     if matches.is_err() {
@@ -67,6 +67,8 @@ fn main() -> Result<(), std::io::Error> {
     let carvename = matches.opt_str("f").expect("Option f not supplied.");
     let hashname = matches.opt_str("h").expect("Option h not supplied.");
     let extname = matches.opt_str("e").expect("Option e not supplied.");
+    let max_threads: usize = matches.opt_get("j").ok().unwrap().unwrap_or(1);
+    let byteseek: i64 = matches.opt_get("s").ok().unwrap().unwrap_or(0);
 
     let hashes: Vec<String> =
         String::from_utf8(read(hashname).expect("Can't read from hash file."))
@@ -86,14 +88,24 @@ fn main() -> Result<(), std::io::Error> {
     let mut carvefile = File::open(&carvename).unwrap();
     let mut buffer: [u8; 32] = [0; 32];
 
-    let mut threads: Vec<thread::JoinHandle<()>> = Vec::with_capacity(THREADS);
+    // A collection of threads that return nothing
+    let mut threads: Vec<thread::JoinHandle<()>> = Vec::with_capacity(max_threads);
+
+    if byteseek > 0 {
+        println!("Byte seek enabled, resuming from position {}", byteseek);
+    }
+
+    // Start at the position provided by "s", but make sure it starts at a sector
+    carvefile
+        .seek( SeekFrom::Current(byteseek - (byteseek.rem_euclid(512))) )
+        .expect("Couldn't seek file from main thread.");
 
     while let Ok(bufofs) = carvefile.read(&mut buffer) {
         if bufofs <= 0 {
             break;
         }
 
-        if threads.len() >= THREADS {
+        if threads.len() >= max_threads {
             if let Some(cur_thread) = threads.pop() {
                 cur_thread.join().expect("Unable to join thread.");
             }
@@ -116,7 +128,7 @@ fn main() -> Result<(), std::io::Error> {
                     ofs
                 );
 
-                threads.push(thread::spawn(move || create_file(name, hash, ofs)));
+                threads.insert(0, thread::spawn(move || create_file(name, hash, ofs)));
             }
         }
 
